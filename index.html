@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡単カウンター</title>
+    <link href="https://unpkg.com/sanitize.css" rel="stylesheet"/>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        .counter {
+            font-size: 1000%;
+        }
+
+        .total {
+            font-size: 100%;
+        }
+
+        p {
+            font-size: 200%;
+        }
+    </style>
+</head>
+
+<body>
+    <p>Enter, ↑:+1  Backspace, ↓:-1  Space:保存</p>
+    <h1><span class="counter" id="counter">0</span><span>合計:<span  class="total" id="total">0</span></span></h1>
+    <div id="parent">
+    </div>
+    <script>
+        let count = 0, total = 0;
+        let today = new Date();
+        const counter = document.getElementById('counter');
+        const totaldisplay = document.getElementById('total');
+        const parent = document.getElementById('parent');
+        window.document.onkeyup = function (event) {
+            if (event.key === 'ArrowUp' || event.key === 'Enter') {
+                count += 1;
+                counter.textContent = count;
+            } else if (event.key === 'ArrowDown' && count > 0 || event.key === 'Backspace' && count > 0) {
+                count -= 1;
+                counter.textContent = count;
+            } else if (event.key === ' ') {
+                let history = document.createElement("p");
+                let now = today.getFullYear() + "/" + (today.getMonth() + 1) + "/" + today.getDate() + " " + today.getHours() + ":" + today.getMinutes() + ":" + today.getSeconds();
+                history.innerText = now + " 来客:" + count +"人";
+                parent.appendChild(history);
+                total = total + count;
+                totaldisplay.textContent = total;
+                count = 0;
+                counter.textContent = count;
+            }
+        }
+
+    </script>
+</body>
+
+</html>

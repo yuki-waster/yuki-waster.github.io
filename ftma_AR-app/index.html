@@ -1,0 +1,403 @@
+<!-- 
+ATTENTION: This code is written by Claude. 
+I do not take any responsibility for this. 
+-->
+
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>ARカラーキューブ</title>
+
+    <!--
+  A-Frame と AR.js は共にバージョンの組み合わせに互換性があるため、
+  ドキュメントが推奨する組み合わせ（A-Frame 1.6.0 / AR.js 3.4.7）に
+  バージョンを固定して読み込む（"master" 等の最新追従指定は破壊的変更で
+  突然動かなくなるリスクがあるため使用しない）。
+-->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"></script>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+                "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        a-scene {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ===== 起動時ローディング画面 =====
+     AR.js は .arjs-loader というクラスの要素を、カメラ映像の準備が
+     整った時点で自動的に DOM から削除してくれる仕組みを持っている。
+     これを利用することで、追加のJSを書かずに確実にローディング表示を
+     消すことができる。 */
+        .arjs-loader {
+            height: 100%;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            background-color: rgba(0, 0, 0, 0.92);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            text-align: center;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+
+        .arjs-loader .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.25);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .arjs-loader p {
+            font-size: 15px;
+            line-height: 1.6;
+            max-width: 320px;
+            margin: 4px 0;
+        }
+
+        .arjs-loader p.small {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 12px;
+        }
+
+        /* ===== 画面上部：ステータス表示 ===== */
+        #status-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 500;
+            display: flex;
+            justify-content: center;
+            padding: max(12px, env(safe-area-inset-top)) 16px 12px 16px;
+            pointer-events: none;
+        }
+
+        #status-text {
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 13px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            text-align: center;
+            max-width: 90vw;
+            box-sizing: border-box;
+        }
+
+        #status-text.found {
+            background: rgba(34, 139, 87, 0.75);
+        }
+
+        /* ===== 画面下部：カラー変更パネル ===== */
+        #color-panel {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 500;
+            padding: 14px 16px max(16px, env(safe-area-inset-bottom)) 16px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.55) 60%, rgba(0, 0, 0, 0) 100%);
+            box-sizing: border-box;
+        }
+
+        #color-panel .panel-inner {
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        #color-panel .panel-label {
+            color: #fff;
+            font-size: 12px;
+            opacity: 0.85;
+            margin: 0 0 8px 4px;
+            letter-spacing: 0.02em;
+        }
+
+        #swatch-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .swatch {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+            padding: 0;
+            cursor: pointer;
+            flex-shrink: 0;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 0.12s ease;
+        }
+
+        .swatch:active {
+            transform: scale(0.88);
+        }
+
+        .swatch.selected {
+            border-color: #fff;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 自由選択カラーピッカー（ネイティブUIを利用するため、
+     ブラウザ標準の色選択ダイアログが確実に動作する） */
+        #free-color-wrap {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px dashed rgba(255, 255, 255, 0.85);
+            flex-shrink: 0;
+            position: relative;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        #colorPicker {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 56px;
+            height: 56px;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            background: none;
+        }
+
+        /* ===== 案内オーバーレイ（初回のみ表示） ===== */
+        #howto {
+            position: fixed;
+            inset: 0;
+            z-index: 800;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 24px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+
+        #howto h1 {
+            font-size: 18px;
+            margin: 0 0 12px 0;
+        }
+
+        #howto p {
+            font-size: 14px;
+            line-height: 1.8;
+            max-width: 360px;
+            opacity: 0.9;
+            margin: 0 0 6px 0;
+        }
+
+        #howto button {
+            margin-top: 24px;
+            background: #fff;
+            color: #000;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 999px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #howto .marker-hint {
+            margin-top: 18px;
+            font-size: 12px;
+            opacity: 0.65;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- AR.js が自動的に消してくれるローディング画面 -->
+    <div class="arjs-loader">
+        <div class="spinner"></div>
+        <p>カメラを起動しています…</p>
+        <p class="small">カメラへのアクセス許可を求められたら「許可」を選択してください</p>
+    </div>
+
+    <!-- 初回案内 -->
+    <div id="howto">
+        <h1>ARカラーキューブ</h1>
+        <p>「Hiro」マーカーにスマートフォンのカメラを向けると、3Dキューブが表示されます。</p>
+        <p>画面下のパレットで、キューブの色を自由に変更できます。</p>
+        <div class="marker-hint">※ Hiroマーカーの画像は事前に印刷するか、別の画面に表示しておいてください</div>
+        <button id="howto-start">はじめる</button>
+    </div>
+
+    <!-- ステータス表示 -->
+    <div id="status-bar">
+        <div id="status-text">Hiroマーカーにカメラを向けてください</div>
+    </div>
+
+    <a-scene vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true; precision: medium; alpha: true"
+        embedded arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix;">
+        <a-assets></a-assets>
+
+        <a-marker preset="hiro" id="hiro-marker" smooth="true" smoothCount="10" smoothTolerance="0.01"
+            smoothThreshold="5">
+            <a-box id="ar-box" position="0 0.5 0" scale="1 1 1"
+                material="color: #FF3B30; roughness: 0.6; metalness: 0.1"
+                animation="property: rotation; to: 0 360 0; loop: true; dur: 12000; easing: linear"></a-box>
+        </a-marker>
+
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <!-- 色変更パネル（HTMLオーバーレイのUIボタンを使用。
+       3Dオブジェクトへのタップ／レイキャスト判定に頼らないため
+       端末やブラウザによる挙動差が少なく、確実に動作する） -->
+    <div id="color-panel">
+        <div class="panel-inner">
+            <div class="panel-label">キューブの色</div>
+            <div id="swatch-row">
+                <button class="swatch selected" data-color="#FF3B30" style="background:#FF3B30" aria-label="赤"></button>
+                <button class="swatch" data-color="#FF9500" style="background:#FF9500" aria-label="オレンジ"></button>
+                <button class="swatch" data-color="#FFCC00" style="background:#FFCC00" aria-label="黄色"></button>
+                <button class="swatch" data-color="#34C759" style="background:#34C759" aria-label="緑"></button>
+                <button class="swatch" data-color="#007AFF" style="background:#007AFF" aria-label="青"></button>
+                <button class="swatch" data-color="#5856D6" style="background:#5856D6" aria-label="紫"></button>
+                <button class="swatch" data-color="#FFFFFF" style="background:#FFFFFF" aria-label="白"></button>
+                <button class="swatch" data-color="#1C1C1E" style="background:#1C1C1E" aria-label="黒"></button>
+
+                <!-- 自由な色選択：ブラウザ標準のカラーピッカーを利用 -->
+                <div id="free-color-wrap" aria-label="自由に色を選択" title="自由に色を選択">
+                    <input type="color" id="colorPicker" value="#FF3B30">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            function ready(fn) {
+                if (document.readyState !== 'loading') fn();
+                else document.addEventListener('DOMContentLoaded', fn);
+            }
+
+            ready(function () {
+                var box = document.getElementById('ar-box');
+                var marker = document.getElementById('hiro-marker');
+                var statusText = document.getElementById('status-text');
+                var swatches = document.querySelectorAll('.swatch');
+                var picker = document.getElementById('colorPicker');
+                var howto = document.getElementById('howto');
+                var howtoStart = document.getElementById('howto-start');
+
+                // ----- 案内オーバーレイを閉じる -----
+                howtoStart.addEventListener('click', function () {
+                    howto.style.display = 'none';
+                });
+
+                // ----- 色を適用する共通処理 -----
+                function applyColor(hex) {
+                    box.setAttribute('material', 'color', hex);
+
+                    // スウォッチの選択状態を更新
+                    swatches.forEach(function (el) {
+                        var isMatch = el.dataset.color.toLowerCase() === hex.toLowerCase();
+                        el.classList.toggle('selected', isMatch);
+                    });
+
+                    // カラーピッカーの表示値も同期
+                    if (picker.value.toLowerCase() !== hex.toLowerCase()) {
+                        picker.value = hex;
+                    }
+                }
+
+                // ----- プリセットカラーのボタン -----
+                swatches.forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        applyColor(btn.dataset.color);
+                    });
+                });
+
+                // ----- 自由なカラーピッカー（input[type=color]） -----
+                // input イベントはドラッグ中もリアルタイムに発火するため、
+                // 色を選んでいる最中からプレビューできる。
+                picker.addEventListener('input', function (e) {
+                    applyColor(e.target.value);
+                });
+
+                // ----- マーカー検出状態の表示 -----
+                if (marker) {
+                    marker.addEventListener('markerFound', function () {
+                        statusText.textContent = 'マーカーを検出しました';
+                        statusText.classList.add('found');
+                    });
+                    marker.addEventListener('markerLost', function () {
+                        statusText.textContent = 'Hiroマーカーにカメラを向けてください';
+                        statusText.classList.remove('found');
+                    });
+                }
+
+                // ----- カメラ利用不可・エラー時のフォールバック案内 -----
+                // AR.js / getUserMedia がエラーを返した場合、ローディング画面が
+                // 消えないままになることがあるため、一定時間後もローディング中の
+                // 場合は案内メッセージを追加表示する。
+                window.setTimeout(function () {
+                    var loader = document.querySelector('.arjs-loader');
+                    if (loader) {
+                        var msg = document.createElement('p');
+                        msg.className = 'small';
+                        msg.textContent =
+                            'カメラが起動しない場合は、HTTPS接続であること／カメラの利用が許可されていること／他のアプリがカメラを使用していないことをご確認ください。';
+                        loader.appendChild(msg);
+                    }
+                }, 8000);
+            });
+        })();
+    </script>
+
+</body>
+
+</html>

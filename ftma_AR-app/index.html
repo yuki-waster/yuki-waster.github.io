@@ -22,8 +22,9 @@ I do not take any responsibility for this.
         };
     </script>
 
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js" onerror="window.__onLibLoadError('A-Frame')"></script>
-    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        onerror="window.__onLibLoadError('Three.js')"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/three.js/build/ar.js"
         onerror="window.__onLibLoadError('AR.js')"></script>
 
     <style>
@@ -40,9 +41,14 @@ I do not take any responsibility for this.
             -webkit-text-size-adjust: 100%;
         }
 
-        a-scene {
+        /* Three.jsのCanvas配置用 */
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
+            z-index: 1;
         }
 
         .arjs-loader {
@@ -356,20 +362,6 @@ I do not take any responsibility for this.
         <div id="status-text">Hiroマーカーにカメラを向けてください</div>
     </div>
 
-    <a-scene vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true; precision: medium; alpha: true"
-        embedded arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix;">
-        <a-assets></a-assets>
-
-        <a-marker preset="hiro" id="hiro-marker" smooth="true" smoothCount="10" smoothTolerance="0.01"
-            smoothThreshold="5">
-            <a-box id="ar-box" position="0 0.5 0" scale="1 1 1"
-                material="color: #FF3B30; roughness: 0.6; metalness: 0.1"
-                animation="property: rotation; to: 0 360 0; loop: true; dur: 12000; easing: linear"></a-box>
-        </a-marker>
-
-        <a-entity camera></a-entity>
-    </a-scene>
-
     <div id="color-panel">
         <div class="panel-inner">
             <div class="panel-label">キューブの色</div>
@@ -400,20 +392,131 @@ I do not take any responsibility for this.
             }
 
             ready(function () {
-                var box = document.getElementById('ar-box');
-                var marker = document.getElementById('hiro-marker');
-                var statusText = document.getElementById('status-text');
                 var swatches = document.querySelectorAll('.swatch');
                 var picker = document.getElementById('colorPicker');
                 var howto = document.getElementById('howto');
                 var howtoStart = document.getElementById('howto-start');
+                var statusText = document.getElementById('status-text');
+                var loader = document.querySelector('.arjs-loader');
 
+                var mesh, material;
+                var arToolkitSource, arToolkitContext;
+                var markerRoot;
+                var wasMarkerVisible = false;
+
+                // ----- 案内オーバーレイを閉じる -----
                 howtoStart.addEventListener('click', function () {
                     howto.style.display = 'none';
                 });
 
+                // ----- Three.js ＆ AR.js 初期化組み込み -----
+                if (typeof THREE !== 'undefined' && typeof THREEx !== 'undefined') {
+                    initAR();
+                    animate();
+                }
+
+                function initAR() {
+                    // シーン・カメラ・レンダラーの生成
+                    var scene = new THREE.Scene();
+                    var camera = new THREE.Camera();
+                    scene.add(camera);
+
+                    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    renderer.setPixelRatio(window.devicePixelRatio);
+                    document.body.appendChild(renderer.domElement);
+
+                    // ライト設定
+                    var ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+                    scene.add(ambientLight);
+                    var directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+                    directionalLight.position.set(0, 8, 0);
+                    scene.add(directionalLight);
+
+                    // トラッキングソースの設定
+                    arToolkitSource = new THREEx.ArToolkitSource({ sourceType: 'webcam' });
+                    arToolkitSource.init(function onReady() {
+                        setTimeout(onResize, 500);
+                    });
+
+                    window.addEventListener('resize', onResize);
+                    function onResize() {
+                        arToolkitSource.onResizeElement();
+                        arToolkitSource.copyElementSizeTo(renderer.domElement);
+                        if (arToolkitContext.arController !== null) {
+                            arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);
+                        }
+                    }
+
+                    // コンテキストの設定
+                    arToolkitContext = new THREEx.ArToolkitContext({
+                        cameraParametersUrl: 'https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/data/data/camera_para.dat',
+                        detectionMode: 'mono'
+                    });
+                    arToolkitContext.init(function onCompleted() {
+                        camera.projectionMatrix.copy(arToolkitContext.getProjectionMatrix());
+                        // 初期化完了に伴いローディングを非表示にする
+                        if (loader) loader.style.display = 'none';
+                    });
+
+                    // マーカーコントロールの設定
+                    markerRoot = new THREE.Group();
+                    scene.add(markerRoot);
+                    var markerControls = new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
+                        type: 'pattern',
+                        patternUrl: 'https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/data/data/patt.hiro',
+                    });
+
+                    // 3Dオブジェクト（キューブ）の生成
+                    var geometry = new THREE.BoxGeometry(1, 1, 1);
+                    material = new THREE.MeshStandardMaterial({ color: 0xFF3B30, roughness: 0.6, metalness: 0.1 });
+                    mesh = new THREE.Mesh(geometry, material);
+                    mesh.position.y = 0.5;
+                    markerRoot.add(mesh);
+
+                    window.scene = scene;
+                    window.camera = camera;
+                    window.renderer = renderer;
+                }
+
+                function animate() {
+                    requestAnimationFrame(animate);
+
+                    if (arToolkitSource && arToolkitSource.ready !== false) {
+                        arToolkitContext.update(arToolkitSource.domElement);
+                    }
+
+                    if (mesh) {
+                        mesh.rotation.y += 0.01;
+                    }
+
+                    // マーカー検出状態の監視
+                    if (markerRoot) {
+                        if (markerRoot.visible) {
+                            if (!wasMarkerVisible) {
+                                statusText.textContent = 'マーカーを検出しました';
+                                statusText.classList.add('found');
+                                wasMarkerVisible = true;
+                            }
+                        } else {
+                            if (wasMarkerVisible) {
+                                statusText.textContent = 'Hiroマーカーにカメラを向けてください';
+                                statusText.classList.remove('found');
+                                wasMarkerVisible = false;
+                            }
+                        }
+                    }
+
+                    if (window.renderer && window.scene && window.camera) {
+                        window.renderer.render(window.scene, window.camera);
+                    }
+                }
+
+                // ----- 色を適用する共通処理 -----
                 function applyColor(hex) {
-                    box.setAttribute('material', 'color', hex);
+                    if (material) {
+                        material.color.set(hex);
+                    }
 
                     swatches.forEach(function (el) {
                         var isMatch = el.dataset.color.toLowerCase() === hex.toLowerCase();
@@ -435,17 +538,7 @@ I do not take any responsibility for this.
                     applyColor(e.target.value);
                 });
 
-                if (marker) {
-                    marker.addEventListener('markerFound', function () {
-                        statusText.textContent = 'マーカーを検出しました';
-                        statusText.classList.add('found');
-                    });
-                    marker.addEventListener('markerLost', function () {
-                        statusText.textContent = 'Hiroマーカーにカメラを向けてください';
-                        statusText.classList.remove('found');
-                    });
-                }
-
+                // ----- 自動診断ロジック -----
                 var diagList = document.getElementById('diag-list');
                 var diagPanel = document.getElementById('diag-panel');
                 var diagCheckBtn = document.getElementById('diag-check-btn');
@@ -470,7 +563,7 @@ I do not take any responsibility for this.
                     if (window.isSecureContext) {
                         addDiagItem('ok', 'HTTPS接続: 問題なし');
                     } else {
-                        addDiagItem('ng', 'HTTPS接続になっていません(file://やhttp://で開いている可能性)');
+                        addDiagItem('ng', 'HTTPS接続になっていません');
                     }
 
                     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -480,10 +573,9 @@ I do not take any responsibility for this.
                     }
 
                     if (window.__libLoadErrors && window.__libLoadErrors.length > 0) {
-                        addDiagItem('ng', '読み込み失敗: ' + window.__libLoadErrors.join(', ') +
-                            '（通信環境がCDNをブロックしている可能性があります）');
-                    } else if (typeof AFRAME === 'undefined') {
-                        addDiagItem('ng', 'A-Frameライブラリが正しく初期化されていません');
+                        addDiagItem('ng', '読み込み失敗: ' + window.__libLoadErrors.join(', '));
+                    } else if (typeof THREE === 'undefined') {
+                        addDiagItem('ng', 'Three.jsライブラリが正しく初期化されていません');
                     } else {
                         addDiagItem('ok', 'ARライブラリの読み込み: 問題なし');
                     }
@@ -495,14 +587,13 @@ I do not take any responsibility for this.
                     } catch (e) {
                         webglOk = false;
                     }
-                    addDiagItem(webglOk ? 'ok' : 'ng', 'WebGL: ' + (webglOk ? '利用可能' : '利用できません（端末の設定やモードをご確認ください）'));
+                    addDiagItem(webglOk ? 'ok' : 'ng', 'WebGL: ' + (webglOk ? '利用可能' : '利用できません'));
 
                     diagPanel.classList.add('show');
                 }
 
                 window.setTimeout(function () {
-                    var loader = document.querySelector('.arjs-loader');
-                    if (loader) {
+                    if (loader && loader.style.display !== 'none') {
                         runAutoDiagnosis();
                     }
                 }, 6000);
@@ -520,35 +611,10 @@ I do not take any responsibility for this.
                             stream.getTracks().forEach(function (track) { track.stop(); });
                             diagResult.textContent =
                                 '✓ カメラへのアクセスは許可されています。\n' +
-                                'それでも画面が進まない場合は、AR.js側の初期化に問題がある可能性があります。\n' +
-                                'ページを再読み込みするか、別のネットワーク（Wi-Fi/モバイル回線）で試してください。';
+                                '初期化処理で停止している場合は、別ブラウザ（Safari/Chrome推奨）でお試しください。';
                         })
                         .catch(function (err) {
-                            var name = err && err.name;
-                            var msg;
-                            switch (name) {
-                                case 'NotAllowedError':
-                                case 'PermissionDeniedError':
-                                    msg = '✕ カメラの利用が拒否されています。\nブラウザのサイト設定からカメラを「許可」に変更し、ページを再読み込みしてください。';
-                                    break;
-                                case 'NotFoundError':
-                                case 'DevicesNotFoundError':
-                                    msg = '✕ 利用可能なカメラが見つかりませんでした。';
-                                    break;
-                                case 'NotReadableError':
-                                case 'TrackStartError':
-                                    msg = '✕ カメラが他のアプリで使用中の可能性があります。他のカメラ利用アプリを終了してから再度お試しください。';
-                                    break;
-                                case 'OverconstrainedError':
-                                    msg = '✕ 指定した条件（背面カメラ等）に合うカメラが見つかりませんでした。';
-                                    break;
-                                case 'SecurityError':
-                                    msg = '✕ セキュリティ上の理由でカメラにアクセスできません。HTTPS接続でアクセスしているかご確認ください。';
-                                    break;
-                                default:
-                                    msg = '✕ カメラの取得に失敗しました(' + (name || '不明なエラー') + ')。';
-                            }
-                            diagResult.textContent = msg;
+                            diagResult.textContent = '✕ カメラの取得に失敗しました。';
                         });
                 });
             });

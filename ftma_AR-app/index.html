@@ -13,10 +13,9 @@ I do not take any responsibility for this.
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>ARカラーキューブ (MindAR版)</title>
+    <title>ARカラーキューブ (3DOF軽量版)</title>
 
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 
     <style>
         html,
@@ -28,7 +27,32 @@ I do not take any responsibility for this.
             overflow: hidden;
             background: #000;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            -webkit-text-size-adjust: 100%;
+        }
+
+        /* 背景となる生のカメラ映像 */
+        #bg-camera {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* 3D空間の描画（背景を透過） */
+        a-scene {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+
+        .a-canvas {
+            background-color: transparent !important;
         }
 
         #status-bar {
@@ -36,7 +60,7 @@ I do not take any responsibility for this.
             top: 0;
             left: 0;
             right: 0;
-            z-index: 500;
+            z-index: 10;
             display: flex;
             justify-content: center;
             padding: max(12px, env(safe-area-inset-top)) 16px 12px 16px;
@@ -44,19 +68,16 @@ I do not take any responsibility for this.
         }
 
         #status-text {
-            background: rgba(0, 0, 0, 0.55);
+            background: rgba(0, 0, 0, 0.65);
             color: #fff;
             font-size: 13px;
             padding: 8px 16px;
             border-radius: 999px;
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
             text-align: center;
-            max-width: 90vw;
         }
 
-        #status-text.found {
-            background: rgba(34, 139, 87, 0.75);
+        #status-text.ok {
+            background: rgba(34, 139, 87, 0.85);
         }
 
         #color-panel {
@@ -64,9 +85,9 @@ I do not take any responsibility for this.
             left: 0;
             right: 0;
             bottom: 0;
-            z-index: 500;
+            z-index: 10;
             padding: 14px 16px max(16px, env(safe-area-inset-bottom)) 16px;
-            background: linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0) 100%);
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
         }
 
         #color-panel .panel-inner {
@@ -96,7 +117,7 @@ I do not take any responsibility for this.
             border: 2px solid rgba(255, 255, 255, 0.85);
             padding: 0;
             cursor: pointer;
-            transition: transform 0.12s ease;
+            transition: transform 0.1s ease;
         }
 
         .swatch.selected {
@@ -125,7 +146,7 @@ I do not take any responsibility for this.
         #howto {
             position: fixed;
             inset: 0;
-            z-index: 800;
+            z-index: 20;
             background: rgba(0, 0, 0, 0.9);
             color: #fff;
             display: flex;
@@ -148,60 +169,43 @@ I do not take any responsibility for this.
             margin-bottom: 16px;
         }
 
-        .marker-link {
-            color: #4DA8DA;
-            text-decoration: underline;
-            font-size: 14px;
-            margin-bottom: 24px;
-            display: block;
-        }
-
         #howto button {
             background: #fff;
             color: #000;
             border: none;
-            padding: 12px 32px;
+            padding: 14px 36px;
             border-radius: 999px;
             font-size: 15px;
             font-weight: bold;
             cursor: pointer;
-        }
-
-        /* MindARのデフォルトロード画面を非表示化（カスタムUIを優先） */
-        .mindar-ui-overlay {
-            display: none !important;
         }
     </style>
 </head>
 
 <body>
 
+    <video id="bg-camera" autoplay playsinline muted></video>
+
     <div id="howto">
-        <h1>ARカラーキューブ (MindAR版)</h1>
-        <p>ARエンジンを変更しました。<br>以下のリンクからテスト画像を開き、別の端末の画面に表示した状態で、カメラを向けてください。</p>
-        <a class="marker-link"
-            href="https://hiukim.github.io/mind-ar-js-doc/assets/images/card-example-5bc062b325c34e7fcebd2109e46a7be7.png"
-            target="_blank">【重要】テスト画像を表示</a>
-        <button id="howto-start">カメラを起動する</button>
+        <h1>ARカラーキューブ (軽量版)</h1>
+        <p>画像認識を使用せず、ジャイロセンサーで空間にキューブを配置します。<br>カメラとセンサーの利用を許可してください。</p>
+        <button id="howto-start">開始する</button>
     </div>
 
     <div id="status-bar">
-        <div id="status-text">カメラを初期化中...</div>
+        <div id="status-text">待機中...</div>
     </div>
 
-    <a-scene
-        mindar-image="imageTargetSrc: https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind; autoStart: false; uiLoading: no; uiError: no;"
-        color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false"
-        device-orientation-permission-ui="enabled: false">
+    <a-scene vr-mode-ui="enabled: false" renderer="alpha: true; antialias: true;" background="transparent">
 
-        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-
-        <a-entity mindar-image-target="targetIndex: 0" id="target-entity">
-            <a-box id="ar-box" position="0 0 0.1" scale="0.6 0.6 0.6"
+        <a-entity position="0 1.5 -3">
+            <a-box id="ar-box" position="0 0 0" scale="0.8 0.8 0.8"
                 material="color: #FF3B30; roughness: 0.6; metalness: 0.1"
                 animation="property: rotation; to: 0 360 0; loop: true; dur: 8000; easing: linear">
             </a-box>
         </a-entity>
+
+        <a-camera position="0 1.6 0" look-controls="enabled: true; magicWindowTrackingEnabled: true;"></a-camera>
     </a-scene>
 
     <div id="color-panel">
@@ -225,39 +229,61 @@ I do not take any responsibility for this.
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            var scene = document.querySelector('a-scene');
             var box = document.getElementById('ar-box');
-            var target = document.getElementById('target-entity');
             var statusText = document.getElementById('status-text');
             var howto = document.getElementById('howto');
             var startBtn = document.getElementById('howto-start');
             var swatches = document.querySelectorAll('.swatch');
             var picker = document.getElementById('colorPicker');
+            var video = document.getElementById('bg-camera');
 
-            // 開始処理
+            // 背景カメラ起動ロジック
+            function startCamera() {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    statusText.textContent = 'カメラAPIがサポートされていません';
+                    return;
+                }
+
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+                    .then(function (stream) {
+                        video.srcObject = stream;
+                        // iOS等での自動再生を強制
+                        var playPromise = video.play();
+                        if (playPromise !== undefined) {
+                            playPromise.then(function () {
+                                statusText.textContent = '動作中';
+                                statusText.classList.add('ok');
+                            }).catch(function (error) {
+                                statusText.textContent = '再生がブロックされました';
+                            });
+                        }
+                    })
+                    .catch(function (err) {
+                        statusText.textContent = 'カメラの取得に失敗しました';
+                    });
+            }
+
+            // 開始ボタン押下時（iOS 13+のジャイロ権限リクエストを含む）
             startBtn.addEventListener('click', function () {
                 howto.style.display = 'none';
-                scene.systems["mindar-image-system"].start(); // カメラ明示的起動
+                statusText.textContent = 'カメラを起動中...';
+
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(function (permissionState) {
+                            if (permissionState === 'granted') {
+                                startCamera();
+                            } else {
+                                statusText.textContent = 'センサー権限が拒否されました';
+                            }
+                        })
+                        .catch(console.error);
+                } else {
+                    startCamera();
+                }
             });
 
-            // MindAR イベント処理
-            scene.addEventListener('arReady', function () {
-                statusText.textContent = 'マーカー画像を探しています';
-            });
-            scene.addEventListener('arError', function () {
-                statusText.textContent = 'カメラの初期化に失敗しました';
-            });
-
-            target.addEventListener('targetFound', function () {
-                statusText.textContent = 'マーカーを検出しました';
-                statusText.classList.add('found');
-            });
-            target.addEventListener('targetLost', function () {
-                statusText.textContent = 'マーカー画像を探しています';
-                statusText.classList.remove('found');
-            });
-
-            // カラー変更ロジック
+            // 色変更ロジック
             function applyColor(hex) {
                 box.setAttribute('material', 'color', hex);
                 swatches.forEach(function (el) {

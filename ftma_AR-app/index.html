@@ -16,13 +16,27 @@ I do not take any responsibility for this.
     <title>ARカラーキューブ</title>
 
     <!--
+  ライブラリ読み込みの失敗を検知するためのフラグ。
+  CDNがネットワーク環境でブロックされている場合、<script>タグは
+  何もエラーを表示せず静かに失敗することがあるため、onerror属性で
+  明示的に検知できるようにしておく。
+-->
+    <script>
+        window.__libLoadErrors = [];
+        window.__onLibLoadError = function (name) {
+            window.__libLoadErrors.push(name);
+        };
+    </script>
+
+    <!--
   A-Frame と AR.js は共にバージョンの組み合わせに互換性があるため、
   ドキュメントが推奨する組み合わせ（A-Frame 1.6.0 / AR.js 3.4.7）に
   バージョンを固定して読み込む（"master" 等の最新追従指定は破壊的変更で
   突然動かなくなるリスクがあるため使用しない）。
 -->
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"></script>
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js" onerror="window.__onLibLoadError('A-Frame')"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"
+        onerror="window.__onLibLoadError('AR.js')"></script>
 
     <style>
         html,
@@ -205,6 +219,86 @@ I do not take any responsibility for this.
             background: none;
         }
 
+        /* ===== ローディング画面内の診断パネル（一定時間後に表示） ===== */
+        #diag-panel {
+            display: none;
+            margin-top: 20px;
+            padding: 16px;
+            max-width: 340px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 12px;
+            text-align: left;
+        }
+
+        #diag-panel.show {
+            display: block;
+        }
+
+        #diag-panel h2 {
+            font-size: 13px;
+            margin: 0 0 10px 0;
+            font-weight: 600;
+        }
+
+        #diag-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            font-size: 12.5px;
+            line-height: 1.9;
+        }
+
+        #diag-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+        }
+
+        #diag-list .mark {
+            flex-shrink: 0;
+            font-weight: 700;
+        }
+
+        #diag-list .ok .mark {
+            color: #34C759;
+        }
+
+        #diag-list .ng .mark {
+            color: #FF453A;
+        }
+
+        #diag-list .warn .mark {
+            color: #FFD60A;
+        }
+
+        #diag-panel .diag-note {
+            margin-top: 10px;
+            font-size: 11.5px;
+            opacity: 0.75;
+            line-height: 1.6;
+        }
+
+        #diag-check-btn {
+            margin-top: 12px;
+            width: 100%;
+            background: #fff;
+            color: #000;
+            border: none;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #diag-result {
+            margin-top: 8px;
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
         /* ===== 案内オーバーレイ（初回のみ表示） ===== */
         #howto {
             position: fixed;
@@ -261,6 +355,18 @@ I do not take any responsibility for this.
         <div class="spinner"></div>
         <p>カメラを起動しています…</p>
         <p class="small">カメラへのアクセス許可を求められたら「許可」を選択してください</p>
+
+        <!-- 一定時間たっても起動しない場合に自動表示される診断パネル -->
+        <div id="diag-panel">
+            <h2>診断結果</h2>
+            <ul id="diag-list"></ul>
+            <button id="diag-check-btn">カメラ権限を今すぐ確認する</button>
+            <div id="diag-result"></div>
+            <p class="diag-note">
+                改善しない場合は、ブラウザのアドレスバー左のアイコン（鍵マーク等）から
+                「サイトの設定」→「カメラ」を開き、許可になっているか確認してください。
+            </p>
+        </div>
     </div>
 
     <!-- 初回案内 -->
@@ -380,20 +486,125 @@ I do not take any responsibility for this.
                     });
                 }
 
-                // ----- カメラ利用不可・エラー時のフォールバック案内 -----
+                // ----- カメラ利用不可・エラー時の自動診断 -----
                 // AR.js / getUserMedia がエラーを返した場合、ローディング画面が
-                // 消えないままになることがあるため、一定時間後もローディング中の
-                // 場合は案内メッセージを追加表示する。
+                // 消えないままになることがある。その際に何が原因で止まっているのかを
+                // 実機上で確認できるよう、一定時間後に自動で診断結果を表示する。
+                var diagList = document.getElementById('diag-list');
+                var diagPanel = document.getElementById('diag-panel');
+                var diagCheckBtn = document.getElementById('diag-check-btn');
+                var diagResult = document.getElementById('diag-result');
+
+                function addDiagItem(status, label) {
+                    // status: 'ok' | 'ng' | 'warn'
+                    var li = document.createElement('li');
+                    li.className = status;
+                    var mark = document.createElement('span');
+                    mark.className = 'mark';
+                    mark.textContent = status === 'ok' ? '✓' : (status === 'ng' ? '✕' : '!');
+                    var text = document.createElement('span');
+                    text.textContent = label;
+                    li.appendChild(mark);
+                    li.appendChild(text);
+                    diagList.appendChild(li);
+                }
+
+                function runAutoDiagnosis() {
+                    diagList.innerHTML = '';
+
+                    // 1) HTTPS（安全なコンテキスト）かどうか
+                    if (window.isSecureContext) {
+                        addDiagItem('ok', 'HTTPS接続: 問題なし');
+                    } else {
+                        addDiagItem('ng', 'HTTPS接続になっていません(file://やhttp://で開いている可能性)');
+                    }
+
+                    // 2) getUserMedia APIの存在
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                        addDiagItem('ok', 'カメラAPI(getUserMedia): 利用可能');
+                    } else {
+                        addDiagItem('ng', 'このブラウザはカメラAPIに対応していません');
+                    }
+
+                    // 3) ライブラリ(A-Frame / AR.js)が読み込めたか
+                    if (window.__libLoadErrors && window.__libLoadErrors.length > 0) {
+                        addDiagItem('ng', '読み込み失敗: ' + window.__libLoadErrors.join(', ') +
+                            '（通信環境がCDNをブロックしている可能性があります）');
+                    } else if (typeof AFRAME === 'undefined') {
+                        addDiagItem('ng', 'A-Frameライブラリが正しく初期化されていません');
+                    } else {
+                        addDiagItem('ok', 'ARライブラリの読み込み: 問題なし');
+                    }
+
+                    // 4) WebGLが使えるか
+                    var webglOk = false;
+                    try {
+                        var testCanvas = document.createElement('canvas');
+                        webglOk = !!(testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl'));
+                    } catch (e) {
+                        webglOk = false;
+                    }
+                    addDiagItem(webglOk ? 'ok' : 'ng', 'WebGL: ' + (webglOk ? '利用可能' : '利用できません（端末の設定やモードをご確認ください）'));
+
+                    diagPanel.classList.add('show');
+                }
+
+                // 6秒経ってもローディングが終わらない場合に自動診断を実行
                 window.setTimeout(function () {
                     var loader = document.querySelector('.arjs-loader');
                     if (loader) {
-                        var msg = document.createElement('p');
-                        msg.className = 'small';
-                        msg.textContent =
-                            'カメラが起動しない場合は、HTTPS接続であること／カメラの利用が許可されていること／他のアプリがカメラを使用していないことをご確認ください。';
-                        loader.appendChild(msg);
+                        runAutoDiagnosis();
                     }
-                }, 8000);
+                }, 6000);
+
+                // 「カメラ権限を今すぐ確認する」ボタン
+                // 単独でgetUserMediaを呼び出し、許可状態やエラーの種類を明示的に表示する。
+                // AR.js自体のカメラ取得とは別に単発で確認するだけなので、
+                // 取得できた場合は即座にストリームを停止する。
+                diagCheckBtn.addEventListener('click', function () {
+                    diagResult.textContent = '確認中…';
+
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        diagResult.textContent = 'このブラウザはカメラAPIに対応していません。';
+                        return;
+                    }
+
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+                        .then(function (stream) {
+                            stream.getTracks().forEach(function (track) { track.stop(); });
+                            diagResult.textContent =
+                                '✓ カメラへのアクセスは許可されています。\n' +
+                                'それでも画面が進まない場合は、AR.js側の初期化に問題がある可能性があります。\n' +
+                                'ページを再読み込みするか、別のネットワーク（Wi-Fi/モバイル回線）で試してください。';
+                        })
+                        .catch(function (err) {
+                            var name = err && err.name;
+                            var msg;
+                            switch (name) {
+                                case 'NotAllowedError':
+                                case 'PermissionDeniedError':
+                                    msg = '✕ カメラの利用が拒否されています。\nブラウザのサイト設定からカメラを「許可」に変更し、ページを再読み込みしてください。';
+                                    break;
+                                case 'NotFoundError':
+                                case 'DevicesNotFoundError':
+                                    msg = '✕ 利用可能なカメラが見つかりませんでした。';
+                                    break;
+                                case 'NotReadableError':
+                                case 'TrackStartError':
+                                    msg = '✕ カメラが他のアプリで使用中の可能性があります。他のカメラ利用アプリを終了してから再度お試しください。';
+                                    break;
+                                case 'OverconstrainedError':
+                                    msg = '✕ 指定した条件（背面カメラ等）に合うカメラが見つかりませんでした。';
+                                    break;
+                                case 'SecurityError':
+                                    msg = '✕ セキュリティ上の理由でカメラにアクセスできません。HTTPS接続でアクセスしているかご確認ください。';
+                                    break;
+                                default:
+                                    msg = '✕ カメラの取得に失敗しました(' + (name || '不明なエラー') + ')。';
+                            }
+                            diagResult.textContent = msg;
+                        });
+                });
             });
         })();
     </script>
